@@ -155,7 +155,7 @@ float convolve(const float *kernel, const float *buffer, const int ksize) {
     return sum;
 }
 
-
+//todo вынести kernel из этой функции
 void gaussian_blur_row(int threadId, unsigned char *src, float *dst, int width, int height, float sigma, int ksize)
 {
     int x, y, i, x1, y1;
