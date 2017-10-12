@@ -7,6 +7,7 @@
 //TODO сделать другой путь /Users/grigoriipogorelov/Desktop/pc hw/lena512.bmp
 
 #define NUM_THREADS 64
+#define M_PI 3.141593
 
 typedef struct
 {
