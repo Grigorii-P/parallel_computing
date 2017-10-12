@@ -5,6 +5,8 @@
 #include <sys/time.h>
 #include <omp.h>
 
+#define M_PI 3.141593
+
 long long wall_clock_time()
 {
 #ifdef LINUX
