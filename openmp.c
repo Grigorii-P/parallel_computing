@@ -2,51 +2,63 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <sys/time.h>
 #include <omp.h>
 
-
+long long wall_clock_time()
+{
+#ifdef LINUX
+    struct timespec tp;
+    clock_gettime(CLOCK_REALTIME, &tp);
+    return (long long)(tp.tv_nsec + (long long)tp.tv_sec * 1000000000ll);
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)(tv.tv_usec * 1000 + (long long)tv.tv_sec * 1000000000ll);
+#endif
+}
 
 int read_BMP(char* filename, unsigned char *info, unsigned char **dataR, unsigned char **dataG, unsigned char **dataB, int *size, int *width, int *height, int *offset, int *row_padded)
 {
     int i = 0, j, k, read_bytes, h, w, o, p;
     unsigned char *data;
-
+    
     FILE* f = fopen(filename, "rb");
-
+    
     if(f == NULL)
     {
         printf ("Invalid filename: %s\n", filename);
         return -1;
     }
-
-
+    
+    
     read_bytes = fread(info, sizeof(unsigned char), 54, f); // read the 54-byte header
     if (read_bytes != 54)
     {
         printf ("Error at read: %d instead of 54 bytes", read_bytes);
         return -1;
     }
-
-
+    
+    
     // extract image data from header
     *width = *(int*)&info[18];
     *height = *(int*)&info[22];
     *size = *(int*)&info[2];
     *offset = *(int*)&info[10];
     *row_padded = (*width*3 + 3) & (~3);
-
-
+    
+    
     //printf ("Filename: %s, Width: %d, Row_padded: %d, Height: %d, Size:  %d, Offset: %d\n", filename, *width, *row_padded, *height, *size, *offset);
     w = *width;
     p = *row_padded;
     h = *height;
     o = *offset;
-
+    
     data = (unsigned char*) malloc (p * h);
     *dataR = (unsigned char*) malloc (w * h);
     *dataG = (unsigned char*) malloc (w * h);
     *dataB = (unsigned char*) malloc (w * h);
-
+    
     fseek(f, sizeof(unsigned char) * o, SEEK_SET);
     read_bytes = fread(data, sizeof(unsigned char), p * h, f);
     if (read_bytes != p * h)
@@ -55,6 +67,9 @@ int read_BMP(char* filename, unsigned char *info, unsigned char **dataR, unsigne
         free (data);
         return -1;
     }
+    
+    
+    //#pragma omp parallel for shared(data, dataB,dataG,dataR) private (k,i,j)
     for (k = 0; k < h; k++)
     {
         i = k * p;
@@ -63,12 +78,12 @@ int read_BMP(char* filename, unsigned char *info, unsigned char **dataR, unsigne
             (*dataB)[k*w + j] = data[i];
             (*dataG)[k*w + j] = data[i + 1];
             (*dataR)[k*w + j] = data[i + 2];
-
+            
             //printf ("BGR %d %d i= %d: %d %d %d\n", k, j, i, data[i], data[i+1], data[i+2]);
             i+= 3;
         }
     }
-
+    
     free (data);
     fclose(f);
     return 0;
@@ -79,22 +94,22 @@ int write_BMP(char* filename, float *dataB, float *dataG, float *dataR, unsigned
     int write_bytes = 0, i, pad_size;
     FILE* f = fopen(filename, "wb");
     unsigned char null_byte = 0, valR, valB, valG;
-
+    
     write_bytes = fwrite (header, sizeof(unsigned char), offset, f);
     if (write_bytes < offset)
     {
         printf( "Error at writing the header\n");
         return -1;
     }
-
-
+    
+    //#pragma omp parallel for private (i)
     for (i = 0; i< width*height; i++)
     {
         if ( dataB[i] > 256.0f || dataR[i] > 256.0f || dataG[i] > 256.0f ){
             printf( "Error: invalid value %f %f %f", dataB[i], dataG[i], dataR[i]);
             return -1;
         }
-
+        
         valB = dataB[i];
         valG = dataG[i];
         valR = dataR[i];
@@ -116,7 +131,7 @@ int write_BMP(char* filename, float *dataB, float *dataG, float *dataR, unsigned
             printf ("Error at write: i = %d %d\n", i, valR);
             return -1;
         }
-
+        
         if ((i + 1) % width == 0 ) {
             pad_size = row_padded - width *3 ;
             while( pad_size-- > 0 ) {
@@ -124,7 +139,7 @@ int write_BMP(char* filename, float *dataB, float *dataG, float *dataR, unsigned
             }
         }
     }
-
+    
     fclose (f);
     return 0;
 }
@@ -145,23 +160,23 @@ float convolve(const float *kernel, const float *buffer, const int ksize) {
 void gaussian_blur(unsigned char *src, float *dst, int width, int height, float sigma, int ksize)
 {
     int x, y, i, x1, y1;
-
+    
     int halfksize = ksize / 2;
     float sum = 0.f, t;
     float *kernel, *buffer;
-
-
-
+    
+    
+    
     // create Gaussian kernel
     kernel = (float*)malloc(ksize * sizeof(float));
     buffer = (float*)malloc(ksize * sizeof(float));
-
+    
     if (!kernel || !buffer)
     {
         printf ("Error in memory allocation!\n");
         return;
     }
-
+    
     // if sigma too small, just copy src to dst
     if (ksize <= 1)
     {
@@ -170,8 +185,8 @@ void gaussian_blur(unsigned char *src, float *dst, int width, int height, float 
                 dst[y*width + x] = src[y*width + x];
         return;
     }
-
-
+    
+    
     //compute the Gaussian kernel values
     for (i = 0; i < ksize; i++)
     {
@@ -185,64 +200,56 @@ void gaussian_blur(unsigned char *src, float *dst, int width, int height, float 
         kernel[i] /= sum;
         //printf ("Kernel [%d] = %f\n", i, kernel[i]);
     }
-
-
+    
+    
     // blur each row
-//    omp_set_num_threads(64);
-#pragma omp for schedule(static)
+    omp_set_num_threads(64);
+#pragma omp parallel for shared(dst,src,kernel) private (y, x1, i, buffer)
     for (y = 0; y < height; y++) {
         for (x1 = 0; x1 < halfksize; x1++) {
             buffer[x1] = (float) src[y * width];
         }
-
+        
         for (x1 = halfksize; x1 < ksize - 1; x1++) {
             buffer[x1] = (float) src[y * width + x1 - halfksize];
         }
-
+        
         for (x1 = 0; x1 < width; x1++) {
             i = (x1 + ksize - 1) % ksize;
-
+            
             if (x1 < width - halfksize) {
                 buffer[i] = (float) src[y * width + x1 + halfksize];
             } else {
                 buffer[i] = (float) src[y * width + width - 1];
             }
-
+            
             dst[y * width + x1] = convolve(kernel, buffer, ksize);
         }
     }
-
-
+    
+    
     // blur each column
-#pragma omp for schedule(static)
-    for (x = 0; x < width; x++)
-    {
-        for (y1 = 0; y1 < halfksize  ; y1++)
-        {
-            buffer[y1] = dst[0*width + x];
+#pragma omp parallel for shared(dst,kernel) private (y1, x, i, buffer)
+    for (x = 0; x < width; x++) {
+        for (y1 = 0; y1 < halfksize; y1++) {
+            buffer[y1] = dst[0 * width + x];
         }
-        for (y1=halfksize; y1 < ksize-1; y1++)
-        {
-            buffer[y1] = dst[(y1-halfksize)*width + x];
+        for (y1 = halfksize; y1 < ksize - 1; y1++) {
+            buffer[y1] = dst[(y1 - halfksize) * width + x];
         }
-
-        for (y1 = 0; y1 < height; y1++)
-        {
-            i = (y1+ksize-1)%ksize;
-            if(y1 < height - halfksize)
-            {
-                buffer[i] = dst[(y1+halfksize)*width + x];
+        
+        for (y1 = 0; y1 < height; y1++) {
+            i = (y1 + ksize - 1) % ksize;
+            if (y1 < height - halfksize) {
+                buffer[i] = dst[(y1 + halfksize) * width + x];
+            } else {
+                buffer[i] = dst[(height - 1) * width + x];
             }
-            else
-            {
-                buffer[i] = dst[(height-1)*width + x];
-            }
-
-            dst[y1*width + x] = convolve(kernel, buffer, ksize);
+            
+            dst[y1 * width + x] = convolve(kernel, buffer, ksize);
         }
     }
-
-
+    
     // clean up
     free(kernel);
     free(buffer);
@@ -253,14 +260,16 @@ void gaussian_blur(unsigned char *src, float *dst, int width, int height, float 
 
 int main(int argc, char ** argv)
 {
-    clock_t start = clock();
-
+    
+    long long before, after;
+    
+    
     unsigned char info[54], *dataR = NULL, *dataG = NULL, *dataB = NULL;
     int blur_size, ret_code = 0, size, width, height, offset, row_padded;
     char *in_filename, *out_filename;
     float* dstB, *dstR, *dstG, sigma;
-
-
+    
+    
     if (argc != 5)
     {
         printf ("Usage: %s <filename.bmp> <sigma> <blur_size> <output_filename.bmp>", argv[0]);
@@ -278,30 +287,33 @@ int main(int argc, char ** argv)
         free (dataG);
         return -1;
     }
-
-
+    
+    
     dstB = (float*)malloc (width*height* sizeof(float));
     dstR = (float*)malloc (width*height* sizeof(float));
     dstG = (float*)malloc (width*height* sizeof(float));
-
+    
+    
+    before = wall_clock_time();
     gaussian_blur (dataB, dstB, width, height, sigma, blur_size);
     gaussian_blur (dataR, dstR, width, height, sigma, blur_size);
     gaussian_blur (dataG, dstG, width, height, sigma, blur_size);
-
+    after = wall_clock_time();
+    fprintf(stderr, "Matrix multiplication took %1.2f seconds\n", ((float)(after - before))/1000000000);
+    
+    
     ret_code = write_BMP (out_filename, dstB, dstG, dstR, info, offset, width, row_padded, height);
-
-
+    
+    
     free (dstB);
     free (dstR);
     free (dstG);
     free (dataB);
     free (dataR);
     free (dataG);
-
-
-    clock_t end = clock();
-    float seconds = (float)(end - start) / CLOCKS_PER_SEC;
-    printf("\nexecution time is %f\n\n", seconds);
-
+    
+    
+    
     return ret_code;
 }
+
