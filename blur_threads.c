@@ -20,6 +20,19 @@ typedef struct
     int ksize;
 } parameters;
 
+long long wall_clock_time()
+{
+#ifdef LINUX
+    struct timespec tp;
+    clock_gettime(CLOCK_REALTIME, &tp);
+    return (long long)(tp.tv_nsec + (long long)tp.tv_sec * 1000000000ll);
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)(tv.tv_usec * 1000 + (long long)tv.tv_sec * 1000000000ll);
+#endif
+}
+
 //todo можно тоже попробовать распараллелить
 int read_BMP(char* filename, unsigned char *info, unsigned char **dataR, unsigned char **dataG, unsigned char **dataB, int *size, int *width, int *height, int *offset, int *row_padded)
 {
@@ -388,6 +401,9 @@ int main(int argc, char ** argv)
         pthread_join(threads[i],NULL);
     }
     
+    long long before, after;
+    before = wall_clock_time();
+    
     for (int i = 0; i < NUM_THREADS; i++) {
         arg[i].threadId = i;
         arg[i].src1 = dataB;
@@ -403,6 +419,10 @@ int main(int argc, char ** argv)
         //        printf("arg->threadId : %d\n", arg[i].threadId);
         pthread_create(&threads[i], NULL, executor_column, (void *)&arg[i]);
     }
+    
+    after = wall_clock_time();
+    fprintf(stderr, "Matrix multiplication took %1.2f seconds\n", ((float)(after - before))/1000000000);
+
     
     
     for (int i= 0;i < NUM_THREADS;i++){

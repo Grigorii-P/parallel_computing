@@ -6,18 +6,18 @@
 
 #define M_PI 3.141593
 
-//long long wall_clock_time()
-//{
-//#ifdef LINUX
-//    struct timespec tp;
-//    clock_gettime(CLOCK_REALTIME, &tp);
-//    return (long long)(tp.tv_nsec + (long long)tp.tv_sec * 1000000000ll);
-//#else
-//    struct timeval tv;
-//    gettimeofday(&tv, NULL);
-//    return (long long)(tv.tv_usec * 1000 + (long long)tv.tv_sec * 1000000000ll);
-//#endif
-//}
+long long wall_clock_time()
+{
+#ifdef LINUX
+    struct timespec tp;
+    clock_gettime(CLOCK_REALTIME, &tp);
+    return (long long)(tp.tv_nsec + (long long)tp.tv_sec * 1000000000ll);
+#else
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long)(tv.tv_usec * 1000 + (long long)tv.tv_sec * 1000000000ll);
+#endif
+}
 
 int read_BMP(char* filename, unsigned char *info, unsigned char **dataR, unsigned char **dataG, unsigned char **dataB, int *size, int *width, int *height, int *offset, int *row_padded)
 {
@@ -200,6 +200,9 @@ void gaussian_blur(unsigned char *src, float *dst, int width, int height, float 
     
     
     // blur each row
+    long long before, after;
+    before = wall_clock_time();
+    
     omp_set_num_threads(64);
 #pragma omp parallel for private(y, x1, i)
     for (y = 0; y < height; y++) {
@@ -259,6 +262,9 @@ void gaussian_blur(unsigned char *src, float *dst, int width, int height, float 
         free(buffer);
     }
     
+    after = wall_clock_time();
+    fprintf(stderr, "Matrix multiplication took %1.2f seconds\n", ((float)(after - before))/1000000000);
+    
     // clean up
     free(kernel);
 }
@@ -312,8 +318,6 @@ int main(int argc, char ** argv)
     free (dataR);
     free (dataG);
     
-//    after = wall_clock_time();
-//    fprintf(stderr, "Matrix multiplication took %1.2f seconds\n", ((float)(after - before))/1000000000);
     
     
     return ret_code;
